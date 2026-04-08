@@ -3,10 +3,6 @@
 # RoScript
 **The Ultimate Roblox Multi-Tool & Utility Hub.**
 
-RoScript V1.0 is a feature-rich, high-performance script hub designed to provide a competitive edge in any Roblox environment. Featuring a sleek, custom-built GUI and a unique "Tornado" physics manipulation system, RoScript is the all-in-one solution for advanced users.
-
----
-
 ## 🔗 Quick Start
 Copy and paste the following line into your preferred executor to launch RoScript:
 
