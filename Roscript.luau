@@ -12,7 +12,7 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 -- Prevent Multiple Instances
-local UI_NAME = "RoScript_Lucide"
+local UI_NAME = "RoScript"
 local success, parent = pcall(function() return CoreGui end)
 local UIParent = success and parent or LocalPlayer:WaitForChild("PlayerGui")
 if UIParent:FindFirstChild(UI_NAME) then
