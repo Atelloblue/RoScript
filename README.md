@@ -47,7 +47,7 @@ RoScript V1.0 comes with a Super Ring control panel. You can modify settings in 
 ---
 
 ## 🤝 Credits
-*   **RoScripts Team** – Brand responsible for the script.
+*   **RoScripts** – Brand responsible for the script.
 *   **Atelloblue** – User that made the brand and script.
 
 ---
