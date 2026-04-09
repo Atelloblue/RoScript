@@ -7,7 +7,7 @@
 Copy and paste the following line into your preferred executor to launch RoScript:
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Atelloblue/RoScript/refs/heads/main/Roscript.luau", true))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Atelloblue/RoScript/refs/heads/main/Roscript.lua", true))()
 ```
 
 ---
