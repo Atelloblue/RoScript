@@ -249,18 +249,54 @@ end
 
 -- [[ SUPER RING LOGIC ]] --
 local superRingParts = {}
+
 local function RetainPart(Part)
     if Part:IsA("BasePart") and not Part.Anchored and Part:IsDescendantOf(workspace) then
-        if Part.Parent == LocalPlayer.Character or Part:IsDescendantOf(LocalPlayer.Character) then return false end
-        Part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0)
-        Part.CanCollide = false
+        -- Ignore all players' characters to prevent flinging them
+        for _, p in pairs(Players:GetPlayers()) do
+            if p.Character and Part:IsDescendantOf(p.Character) then
+                return false
+            end
+        end
+        
+        -- Prevent duplicates
+        if superRingParts[Part] then return false end
+        
+        pcall(function()
+            Part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0)
+            Part.CanCollide = false
+        end)
         return true
     end
     return false
 end
 
-for _, part in pairs(workspace:GetDescendants()) do if RetainPart(part) then table.insert(superRingParts, part) end end
-workspace.DescendantAdded:Connect(function(part) if RetainPart(part) then table.insert(superRingParts, part) end end)
+local function ScanForParts()
+    for _, part in pairs(workspace:GetDescendants()) do 
+        if RetainPart(part) then 
+            superRingParts[part] = true 
+        end 
+    end
+end
+
+-- Initial scan
+ScanForParts()
+
+-- Connect descendant added
+workspace.DescendantAdded:Connect(function(part) 
+    if RetainPart(part) then 
+        superRingParts[part] = true 
+    end 
+end)
+
+-- Dynamic scanner to actively pick up newly unanchored/spawned parts missed by DescendantAdded
+task.spawn(function()
+    while task.wait(2) do
+        if Config.SuperRingEnabled then
+            ScanForParts()
+        end
+    end
+end)
 
 -- [[ LOGIC SYSTEMS ]] --
 local function ImprovedFling(Target)
@@ -448,7 +484,7 @@ end)
 CreateInput(CombatPage, "Aim Smoothness (0.1 - 1)", function(t) Config.AimSmoothness = tonumber(t) or 0.2 end)
 
 -- Players
-function GetPlayer(name)
+local function GetPlayer(name)
     for _, p in pairs(Players:GetPlayers()) do
         if p.Name:lower():sub(1,#name) == name:lower() or p.DisplayName:lower():sub(1,#name) == name:lower() then return p end
     end
@@ -501,15 +537,35 @@ RunService.Heartbeat:Connect(function()
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local center = hrp.Position
-            for i, part in pairs(superRingParts) do
-                if part.Parent and not part.Anchored then
-                    local pos = part.Position
-                    local dist = (Vector3.new(pos.X, center.Y, pos.Z) - center).Magnitude
-                    local angle = math.atan2(pos.Z - center.Z, pos.X - center.X)
-                    local newAngle = angle + math.rad(Config.SuperRingSpeed)
-                    local targetPos = Vector3.new(center.X + math.cos(newAngle) * math.min(Config.SuperRingRadius, dist), center.Y + (Config.SuperRingHeight * (math.abs(math.sin((pos.Y - center.Y) / Config.SuperRingHeight)))), center.Z + math.sin(newAngle) * math.min(Config.SuperRingRadius, dist))
-                    part.Velocity = (targetPos - part.Position).unit * Config.SuperRingStrength
+            -- Steady rotation scaling with the Speed configuration
+            local timeVar = tick() * (Config.SuperRingSpeed * 0.3)
+            
+            local validParts = {}
+            for part, _ in pairs(superRingParts) do
+                if part and part.Parent and not part.Anchored and part:IsDescendantOf(workspace) then
+                    table.insert(validParts, part)
+                else
+                    superRingParts[part] = nil -- Clean up invalid/destroyed parts to prevent memory leaks
                 end
+            end
+            
+            local totalParts = #validParts
+            for i, part in ipairs(validParts) do
+                -- Evenly space out all active parts into a perfect circle
+                local angle = timeVar + ((i / math.max(1, totalParts)) * math.pi * 2)
+                
+                -- Construct pure perfect flat circle shape around the player
+                local targetPos = Vector3.new(
+                    center.X + math.cos(angle) * Config.SuperRingRadius,
+                    center.Y + (Config.SuperRingHeight * 0.05) - 5, -- Maps default '100' height precisely to player waist level 
+                    center.Z + math.sin(angle) * Config.SuperRingRadius
+                )
+                
+                local dir = targetPos - part.Position
+                
+                -- High rigid velocity forces parts strictly into position instantly, fixing any wobble/oval deformity
+                part.AssemblyLinearVelocity = dir * 30
+                part.AssemblyAngularVelocity = Vector3.new(20, 20, 20)
             end
         end
     end
@@ -560,7 +616,9 @@ RunService.RenderStepped:Connect(function()
                     tag.N.Visible = Config.ShowNames
                     tag.B.Visible = Config.ShowHealth
                     tag.N.Text = p.DisplayName
-                    local hp = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
+                    
+                    local maxHp = hum.MaxHealth > 0 and hum.MaxHealth or 100
+                    local hp = math.clamp(hum.Health/maxHp, 0, 1)
                     tag.B.F.Size = UDim2.new(hp, 0, 1, 0)
                     tag.B.F.BackgroundColor3 = Color3.new(1,0,0):Lerp(Color3.new(0,1,0), hp)
                 end
@@ -569,7 +627,7 @@ RunService.RenderStepped:Connect(function()
     end
     if Config.AimbotEnabled then
         local target = GetClosestToMouse()
-        if target and target.Character then
+        if target and target.Character and target.Character:FindFirstChild("Head") then
             local cam = workspace.CurrentCamera
             cam.CFrame = cam.CFrame:Lerp(CFrame.new(cam.CFrame.Position, target.Character.Head.Position), Config.AimSmoothness)
         end
