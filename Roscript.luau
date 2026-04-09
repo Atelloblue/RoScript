@@ -11,6 +11,14 @@ local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
+-- Prevent Multiple Instances
+local UI_NAME = "RoScript_Lucide"
+local success, parent = pcall(function() return CoreGui end)
+local UIParent = success and parent or LocalPlayer:WaitForChild("PlayerGui")
+if UIParent:FindFirstChild(UI_NAME) then
+    UIParent:FindFirstChild(UI_NAME):Destroy()
+end
+
 -- Configuration
 local Config = {
     WalkSpeed = 16,
@@ -36,8 +44,8 @@ local Config = {
 
 -- UI Setup
 local RoScriptUI = Instance.new("ScreenGui")
-RoScriptUI.Name = "RoScript_Lucide"
-RoScriptUI.Parent = CoreGui
+RoScriptUI.Name = UI_NAME
+RoScriptUI.Parent = UIParent
 RoScriptUI.ResetOnSpawn = false
 
 local Theme = {
@@ -115,6 +123,7 @@ RestoreBtn.Font = Enum.Font.GothamBold
 RestoreBtn.TextColor3 = Theme.Accent
 RestoreBtn.TextSize = 10
 RestoreBtn.Visible = false
+RestoreBtn.Active = true
 RestoreBtn.Draggable = true
 Instance.new("UICorner", RestoreBtn).CornerRadius = UDim.new(0, 6)
 Instance.new("UIStroke", RestoreBtn).Color = Theme.Accent
@@ -289,7 +298,7 @@ workspace.DescendantAdded:Connect(function(part)
     end 
 end)
 
--- Dynamic scanner to actively pick up newly unanchored/spawned parts missed by DescendantAdded
+-- Dynamic scanner to actively pick up newly unanchored/spawned parts
 task.spawn(function()
     while task.wait(2) do
         if Config.SuperRingEnabled then
@@ -300,6 +309,7 @@ end)
 
 -- [[ LOGIC SYSTEMS ]] --
 local function ImprovedFling(Target)
+    if Target == LocalPlayer then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local tchar = Target.Character
@@ -315,17 +325,36 @@ local function ImprovedFling(Target)
         BAV.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
         BAV.AngularVelocity = Vector3.new(FlingForce, FlingForce, FlingForce)
         
+        -- Store original collision states
+        local collisions = {}
+        for _, v in pairs(char:GetDescendants()) do 
+            if v:IsA("BasePart") then 
+                collisions[v] = v.CanCollide
+                v.CanCollide = false 
+            end 
+        end
+        
         local FlingLoop = RunService.Heartbeat:Connect(function()
-            if not tchar or not thrp or not tchar.Parent then return end
+            if not tchar or not thrp or not tchar.Parent or not char or not hrp or not char.Parent then return end
             hrp.Velocity = Vector3.new(FlingForce, FlingForce, FlingForce)
             local rot = math.rad(math.random(0, 360))
             hrp.CFrame = thrp.CFrame * CFrame.Angles(rot, rot, rot)
-            for _, v in pairs(char:GetChildren()) do if v:IsA("BasePart") then v.CanCollide = false end end
         end)
+        
         task.wait(3)
-        FlingLoop:Disconnect(); BV:Destroy(); BAV:Destroy()
-        for _, v in pairs(char:GetChildren()) do if v:IsA("BasePart") then v.CanCollide = true end end
-        hrp.Velocity = Vector3.new(0,0,0); hrp.RotVelocity = Vector3.new(0,0,0); hrp.CFrame = OldPos
+        FlingLoop:Disconnect()
+        if BV then BV:Destroy() end
+        if BAV then BAV:Destroy() end
+        
+        -- Restore original collision states
+        for v, canCollide in pairs(collisions) do 
+            if v and v.Parent then v.CanCollide = canCollide end 
+        end
+        if hrp and hrp.Parent then
+            hrp.Velocity = Vector3.new(0,0,0)
+            hrp.RotVelocity = Vector3.new(0,0,0)
+            hrp.CFrame = OldPos
+        end
     end
 end
 
@@ -337,66 +366,94 @@ local function AdvancedServerHop()
         local success, result = pcall(function() return game:HttpGet(url) end)
         if success then
             local data = HttpService:JSONDecode(result)
-            for _, s in pairs(data.data) do
-                if s.playing < s.maxPlayers and s.playing > 0 and s.id ~= game.JobId then
-                    table.insert(Servers, s)
+            if data and data.data then
+                for _, s in pairs(data.data) do
+                    if s.playing < s.maxPlayers and s.playing > 0 and s.id ~= game.JobId then
+                        table.insert(Servers, s)
+                    end
                 end
+                if data.nextPageCursor and #Servers < 100 then GetServers(data.nextPageCursor) end
             end
-            if data.nextPageCursor and #Servers < 100 then GetServers(data.nextPageCursor) end
         end
     end
     GetServers()
     table.sort(Servers, function(a, b) return a.playing > b.playing end)
-    if #Servers > 0 then TeleportService:TeleportToPlaceInstance(game.PlaceId, Servers[1].id) end
+    if #Servers > 0 then TeleportService:TeleportToPlaceInstance(game.PlaceId, Servers[1].id, LocalPlayer) end
 end
 
-CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
-    if Config.AutoRejoin and child.Name == 'ErrorPrompt' then
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+pcall(function()
+    local promptOverlay = CoreGui:WaitForChild("RobloxPromptGui"):WaitForChild("promptOverlay", 3)
+    if promptOverlay then
+        promptOverlay.ChildAdded:Connect(function(child)
+            if Config.AutoRejoin and child.Name == 'ErrorPrompt' then
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end
+        end)
     end
 end)
 
 local flyBV, flyBG
 local function StartFly()
     local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") then return end
     local root = char.HumanoidRootPart
     local hum = char.Humanoid
+    
+    if flyBG then flyBG:Destroy() end
+    if flyBV then flyBV:Destroy() end
+    
     flyBG = Instance.new("BodyGyro", root)
-    flyBG.P = 9e4; flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.P = 9e4
+    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     flyBV = Instance.new("BodyVelocity", root)
     flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     hum.PlatformStand = true
+    
     task.spawn(function()
-        while Config.Flying and char.Parent do
+        while Config.Flying and char and char.Parent and root and root.Parent and hum and hum.Parent do
             local cam = workspace.CurrentCamera
             RunService.RenderStepped:Wait()
-            if hum and root then
-                local moveDir = hum.MoveDirection
-                if moveDir.Magnitude > 0 then
-                    local direction = cam.CFrame:VectorToObjectSpace(moveDir)
-                    local flyVec = (cam.CFrame.LookVector * -direction.Z) + (cam.CFrame.RightVector * direction.X)
-                    flyBV.Velocity = flyVec.Unit * Config.FlySpeed
-                else
-                    flyBV.Velocity = Vector3.new(0, 0.1, 0)
-                end
-                flyBG.CFrame = cam.CFrame
+            local moveDir = hum.MoveDirection
+            if moveDir.Magnitude > 0 then
+                local direction = cam.CFrame:VectorToObjectSpace(moveDir)
+                local flyVec = (cam.CFrame.LookVector * -direction.Z) + (cam.CFrame.RightVector * direction.X)
+                flyBV.Velocity = flyVec.Unit * Config.FlySpeed
+            else
+                flyBV.Velocity = Vector3.new(0, 0.1, 0)
             end
+            flyBG.CFrame = cam.CFrame
         end
         if flyBV then flyBV:Destroy() end
         if flyBG then flyBG:Destroy() end
-        if hum then hum.PlatformStand = false end
+        if hum and hum.Parent then hum.PlatformStand = false end
     end)
 end
 
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    if Config.Flying then
+        task.wait(0.5)
+        StartFly()
+    end
+end)
+
 local function GetClosestToMouse()
     local target, nearest = nil, math.huge
+    local cam = workspace.CurrentCamera
+    if not cam then return nil end
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
-            local pos, onScreen = workspace.CurrentCamera:WorldToScreenPoint(p.Character.Head.Position)
-            if onScreen then
-                local dist = (Vector2.new(pos.X, pos.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
-                if dist < nearest then nearest = dist; target = p end
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then -- Ignore dead players
+                local pos, onScreen = cam:WorldToScreenPoint(p.Character.Head.Position)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if dist < nearest then 
+                        nearest = dist
+                        target = p 
+                    end
+                end
             end
         end
     end
@@ -405,8 +462,9 @@ end
 
 LocalPlayer.Idled:Connect(function()
     if Config.AntiAFK then
-        game:GetService("VirtualUser"):CaptureController()
-        game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+        local VirtualUser = game:GetService("VirtualUser")
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
     end
 end)
 
@@ -485,14 +543,18 @@ CreateInput(CombatPage, "Aim Smoothness (0.1 - 1)", function(t) Config.AimSmooth
 
 -- Players
 local function GetPlayer(name)
+    if name == "" then return nil end
     for _, p in pairs(Players:GetPlayers()) do
         if p.Name:lower():sub(1,#name) == name:lower() or p.DisplayName:lower():sub(1,#name) == name:lower() then return p end
     end
+    return nil
 end
 CreateInput(PlayPage, "Target Username", function(t) Config.TargetPlayer = t end)
 CreateButton(PlayPage, "Teleport to Player", function()
     local t = GetPlayer(Config.TargetPlayer)
-    if t and t.Character then LocalPlayer.Character.HumanoidRootPart.CFrame = t.Character.HumanoidRootPart.CFrame * CFrame.new(0,0,-3) end
+    if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then 
+        LocalPlayer.Character.HumanoidRootPart.CFrame = t.Character.HumanoidRootPart.CFrame * CFrame.new(0,0,-3) 
+    end
 end)
 local IsSpec = false
 CreateButton(PlayPage, "Spectate: OFF", function(btn)
@@ -500,9 +562,18 @@ CreateButton(PlayPage, "Spectate: OFF", function(btn)
     IsSpec = not IsSpec
     if IsSpec then
         local t = GetPlayer(Config.TargetPlayer)
-        if t and t.Character then cam.CameraSubject = t.Character.Humanoid; btn.Text = "Spectate: ON" end
+        if t and t.Character and t.Character:FindFirstChild("Humanoid") then 
+            cam.CameraSubject = t.Character.Humanoid
+            btn.Text = "Spectate: ON" 
+        else
+            IsSpec = false
+            btn.Text = "Spectate: OFF"
+        end
     else
-        cam.CameraSubject = LocalPlayer.Character.Humanoid; btn.Text = "Spectate: OFF"
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            cam.CameraSubject = LocalPlayer.Character.Humanoid
+        end
+        btn.Text = "Spectate: OFF"
     end
 end)
 CreateButton(PlayPage, "Fling Player", function()
@@ -529,7 +600,34 @@ CreateButton(MiscPage, "Rejoin on Kick: ON", function(btn)
 end)
 CreateButton(MiscPage, "Server Hopper (Fullest)", function() AdvancedServerHop() end)
 CreateButton(MiscPage, "Infinite Yield", function() loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))() end)
-CreateButton(MiscPage, "Exit RoScript", function() RoScriptUI:Destroy() end)
+CreateButton(MiscPage, "Exit RoScript", function() 
+    Config.ESPEnabled = false
+    Config.SuperRingEnabled = false
+    Config.Flying = false
+    Config.AimbotEnabled = false
+    -- Full visual cleanup
+    for _, p in pairs(Players:GetPlayers()) do
+        if p.Character then
+            local high = p.Character:FindFirstChild("RoHighlight")
+            if high then high:Destroy() end
+            local tag = p.Character:FindFirstChild("RoTag")
+            if tag then tag:Destroy() end
+        end
+    end
+    -- Normalize specific player resets
+    pcall(function()
+        if workspace.CurrentCamera and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            workspace.CurrentCamera.CameraSubject = LocalPlayer.Character.Humanoid
+        end
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then
+            hum.WalkSpeed = 16
+            hum.JumpPower = 50
+            hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+        end
+    end)
+    RoScriptUI:Destroy() 
+end)
 
 -- [[ UPDATE LOOPS ]] --
 RunService.Heartbeat:Connect(function()
@@ -537,12 +635,11 @@ RunService.Heartbeat:Connect(function()
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local center = hrp.Position
-            -- Steady rotation scaling with the Speed configuration
-            local timeVar = tick() * (Config.SuperRingSpeed * 0.3)
+            local timeVar = os.clock() * (Config.SuperRingSpeed * 0.3)
             
             local validParts = {}
             for part, _ in pairs(superRingParts) do
-                if part and part.Parent and not part.Anchored and part:IsDescendantOf(workspace) then
+                if part and typeof(part) == "Instance" and part.Parent and not part.Anchored and part:IsDescendantOf(workspace) then
                     table.insert(validParts, part)
                 else
                     superRingParts[part] = nil -- Clean up invalid/destroyed parts to prevent memory leaks
@@ -551,19 +648,15 @@ RunService.Heartbeat:Connect(function()
             
             local totalParts = #validParts
             for i, part in ipairs(validParts) do
-                -- Evenly space out all active parts into a perfect circle
                 local angle = timeVar + ((i / math.max(1, totalParts)) * math.pi * 2)
                 
-                -- Construct pure perfect flat circle shape around the player
                 local targetPos = Vector3.new(
                     center.X + math.cos(angle) * Config.SuperRingRadius,
-                    center.Y + (Config.SuperRingHeight * 0.05) - 5, -- Maps default '100' height precisely to player waist level 
+                    center.Y + (Config.SuperRingHeight * 0.05) - 5,
                     center.Z + math.sin(angle) * Config.SuperRingRadius
                 )
                 
                 local dir = targetPos - part.Position
-                
-                -- High rigid velocity forces parts strictly into position instantly, fixing any wobble/oval deformity
                 part.AssemblyLinearVelocity = dir * 30
                 part.AssemblyAngularVelocity = Vector3.new(20, 20, 20)
             end
@@ -571,8 +664,10 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+local espWasEnabled = false
 RunService.RenderStepped:Connect(function()
     if Config.ESPEnabled then
+        espWasEnabled = true
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
                 local hum = p.Character:FindFirstChildOfClass("Humanoid")
@@ -624,12 +719,28 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         end
+    elseif espWasEnabled then
+        -- Complete cleanup when ESP is turned off
+        espWasEnabled = false
+        for _, p in pairs(Players:GetPlayers()) do
+            if p.Character then
+                local high = p.Character:FindFirstChild("RoHighlight")
+                if high then high:Destroy() end
+                local tag = p.Character:FindFirstChild("RoTag")
+                if tag then tag:Destroy() end
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hum then hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer end
+            end
+        end
     end
+    
     if Config.AimbotEnabled then
         local target = GetClosestToMouse()
         if target and target.Character and target.Character:FindFirstChild("Head") then
             local cam = workspace.CurrentCamera
-            cam.CFrame = cam.CFrame:Lerp(CFrame.new(cam.CFrame.Position, target.Character.Head.Position), Config.AimSmoothness)
+            if cam then
+                cam.CFrame = cam.CFrame:Lerp(CFrame.new(cam.CFrame.Position, target.Character.Head.Position), Config.AimSmoothness)
+            end
         end
     end
 end)
@@ -637,13 +748,22 @@ end)
 task.spawn(function()
     while task.wait(0.1) do
         pcall(function()
-            local hum = LocalPlayer.Character.Humanoid
-            if not Config.Flying then hum.WalkSpeed = Config.WalkSpeed; hum.JumpPower = Config.JumpPower; hum.UseJumpPower = true end
-            if Config.Invincible then 
-                hum.Health = hum.MaxHealth 
-                hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) 
-            else
-                hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+            local char = LocalPlayer.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    if not Config.Flying then 
+                        hum.WalkSpeed = Config.WalkSpeed
+                        hum.JumpPower = Config.JumpPower
+                        hum.UseJumpPower = true 
+                    end
+                    if Config.Invincible then 
+                        hum.Health = hum.MaxHealth 
+                        hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) 
+                    else
+                        hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+                    end
+                end
             end
         end)
     end
