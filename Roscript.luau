@@ -25,7 +25,13 @@ local Config = {
     TargetPlayer = "",
     AimbotEnabled = false,
     AimSmoothness = 0.2,
-    AntiAFK = true
+    AntiAFK = true,
+    -- Super Ring Config
+    SuperRingEnabled = false,
+    SuperRingRadius = 50,
+    SuperRingHeight = 100,
+    SuperRingSpeed = 10,
+    SuperRingStrength = 1000
 }
 
 -- UI Setup
@@ -241,8 +247,22 @@ local function CreateInput(parent, placeholder, callback)
     Input.FocusLost:Connect(function() callback(Input.Text) end)
 end
 
--- [[ LOGIC SYSTEMS ]] --
+-- [[ SUPER RING LOGIC ]] --
+local superRingParts = {}
+local function RetainPart(Part)
+    if Part:IsA("BasePart") and not Part.Anchored and Part:IsDescendantOf(workspace) then
+        if Part.Parent == LocalPlayer.Character or Part:IsDescendantOf(LocalPlayer.Character) then return false end
+        Part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0, 0, 0)
+        Part.CanCollide = false
+        return true
+    end
+    return false
+end
 
+for _, part in pairs(workspace:GetDescendants()) do if RetainPart(part) then table.insert(superRingParts, part) end end
+workspace.DescendantAdded:Connect(function(part) if RetainPart(part) then table.insert(superRingParts, part) end end)
+
+-- [[ LOGIC SYSTEMS ]] --
 local function ImprovedFling(Target)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -365,6 +385,7 @@ end)
 -- Initialize Pages
 local HomePage = CreatePage("Home")
 local MovePage = CreatePage("Movement")
+local SuperRingPage = CreatePage("Super Ring")
 local CombatPage = CreatePage("Combat")
 local PlayPage = CreatePage("Players")
 local VisPage = CreatePage("Visuals")
@@ -373,7 +394,6 @@ local MiscPage = CreatePage("Misc")
 -- [[ TAB INITIALIZATION ]] --
 CreateTab("Home", nil)
 local TabDivider = Instance.new("Frame", TabContainer)
-TabDivider.Name = "TabDivider"
 TabDivider.Size = UDim2.new(0.85, 0, 0, 1)
 TabDivider.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 TabDivider.BorderSizePixel = 0
@@ -382,6 +402,7 @@ currentLayoutOrder = currentLayoutOrder + 1
 Instance.new("UICorner", TabDivider).CornerRadius = UDim.new(0, 1)
 
 CreateTab("Movement", "rbxassetid://10734900011")
+CreateTab("Super Ring", "rbxassetid://10709819149")
 CreateTab("Combat", "rbxassetid://10709752906")
 CreateTab("Players", "rbxassetid://10747373176")
 CreateTab("Visuals", "rbxassetid://10723346959")
@@ -405,6 +426,15 @@ CreateButton(MovePage, "Fly: OFF", function(btn)
     btn.Text = "Fly: " .. (Config.Flying and "ON" or "OFF")
     if Config.Flying then StartFly() end
 end)
+
+-- Super Ring
+CreateButton(SuperRingPage, "Super Ring: OFF", function(btn)
+    Config.SuperRingEnabled = not Config.SuperRingEnabled
+    btn.Text = "Super Ring: " .. (Config.SuperRingEnabled and "ON" or "OFF")
+end)
+CreateInput(SuperRingPage, "Radius (50)", function(t) Config.SuperRingRadius = tonumber(t) or 50 end)
+CreateInput(SuperRingPage, "Height (100)", function(t) Config.SuperRingHeight = tonumber(t) or 100 end)
+CreateInput(SuperRingPage, "Rotation Speed (10)", function(t) Config.SuperRingSpeed = tonumber(t) or 10 end)
 
 -- Combat
 CreateButton(CombatPage, "Aimbot: OFF", function(btn)
@@ -439,7 +469,7 @@ CreateButton(PlayPage, "Spectate: OFF", function(btn)
         cam.CameraSubject = LocalPlayer.Character.Humanoid; btn.Text = "Spectate: OFF"
     end
 end)
-CreateButton(PlayPage, "Fling Player (Aggressive)", function()
+CreateButton(PlayPage, "Fling Player", function()
     local t = GetPlayer(Config.TargetPlayer)
     if t then ImprovedFling(t) end
 end)
@@ -448,16 +478,6 @@ end)
 CreateButton(VisPage, "Master ESP: OFF", function(btn)
     Config.ESPEnabled = not Config.ESPEnabled
     btn.Text = "Master ESP: " .. (Config.ESPEnabled and "ON" or "OFF")
-    if not Config.ESPEnabled then
-        for _, p in pairs(Players:GetPlayers()) do
-            if p.Character then
-                if p.Character:FindFirstChild("RoTag") then p.Character.RoTag:Destroy() end
-                if p.Character:FindFirstChild("RoHighlight") then p.Character.RoHighlight:Destroy() end
-                local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                if hum then hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer end
-            end
-        end
-    end
 end)
 CreateButton(VisPage, "Show Names: ON", function(btn) Config.ShowNames = not Config.ShowNames; btn.Text = "Show Names: " .. (Config.ShowNames and "ON" or "OFF") end)
 CreateButton(VisPage, "Show Health: ON", function(btn) Config.ShowHealth = not Config.ShowHealth; btn.Text = "Show Health: " .. (Config.ShowHealth and "ON" or "OFF") end)
@@ -476,9 +496,26 @@ CreateButton(MiscPage, "Infinite Yield", function() loadstring(game:HttpGet('htt
 CreateButton(MiscPage, "Exit RoScript", function() RoScriptUI:Destroy() end)
 
 -- [[ UPDATE LOOPS ]] --
+RunService.Heartbeat:Connect(function()
+    if Config.SuperRingEnabled then
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local center = hrp.Position
+            for i, part in pairs(superRingParts) do
+                if part.Parent and not part.Anchored then
+                    local pos = part.Position
+                    local dist = (Vector3.new(pos.X, center.Y, pos.Z) - center).Magnitude
+                    local angle = math.atan2(pos.Z - center.Z, pos.X - center.X)
+                    local newAngle = angle + math.rad(Config.SuperRingSpeed)
+                    local targetPos = Vector3.new(center.X + math.cos(newAngle) * math.min(Config.SuperRingRadius, dist), center.Y + (Config.SuperRingHeight * (math.abs(math.sin((pos.Y - center.Y) / Config.SuperRingHeight)))), center.Z + math.sin(newAngle) * math.min(Config.SuperRingRadius, dist))
+                    part.Velocity = (targetPos - part.Position).unit * Config.SuperRingStrength
+                end
+            end
+        end
+    end
+end)
 
 RunService.RenderStepped:Connect(function()
-    -- ESP Loop
     if Config.ESPEnabled then
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
@@ -530,7 +567,6 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-    -- Aimbot Loop
     if Config.AimbotEnabled then
         local target = GetClosestToMouse()
         if target and target.Character then
@@ -555,7 +591,6 @@ task.spawn(function()
     end
 end)
 
--- Default Page Init
 Pages["Home"].Visible = true
 Tween(Tabs["Home"], {0.3}, {BackgroundColor3 = Color3.fromRGB(45, 45, 45)})
 if Tabs["Home"]:FindFirstChild("ImageLabel") then
